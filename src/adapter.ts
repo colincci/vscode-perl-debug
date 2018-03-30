@@ -7,6 +7,7 @@ import variableParser, { ParsedVariable, ParsedVariableScope } from './variableP
 import { DebugSession, LaunchOptions } from './session';
 import { LocalSession } from './localSession';
 import { RemoteSession } from './remoteSession';
+import { SshSession, LaunchOptionsSsh } from './sshSession';
 
 interface ResponseError {
 	filename: string,
@@ -75,7 +76,14 @@ function variableValue(val: string): any {
 	return val;
 }
 
-function absoluteFilename(root: string, filename: string): string {
+function absoluteFilename(root: string, clientRoot: string, filename: string): string {
+
+	filename = filename.replace(/\\/g, '/');
+	if (clientRoot) {
+		const fullPath = filename.replace(clientRoot, root) ;
+		return fullPath ;
+	}
+
 	// if it's already absolute then return
 	if (fs.existsSync(filename)) {
 		return filename;
@@ -92,7 +100,24 @@ function absoluteFilename(root: string, filename: string): string {
 	return join(root, filename);
 }
 
-function relativeFilename(root: string, filename: string): string {
+function absoluteClientFilename(root: string, clientRoot: string, filename: string): string {
+
+	filename = filename.replace(/\\/g, '/');
+	if (clientRoot) {
+		const fullPath = filename.replace(root, clientRoot) ;
+		return fullPath ;
+	}
+
+	return absoluteFilename(root, clientRoot, filename) ;
+}
+
+function relativeFilename(root: string, clientRoot: string, filename: string): string {
+	filename = filename.replace(/\\/g, '/');
+	if (clientRoot) {
+		const relName = filename.replace(root, '').replace(/^[\/|\\]/, '');
+		return relName ;
+	}
+
 	// If already relative to root
 	if (fs.existsSync(join(root, filename))) {
 		return filename;
@@ -109,7 +134,7 @@ function relativeFilename(root: string, filename: string): string {
 }
 
 export class perlDebuggerConnection {
-	public debug: boolean = false;
+	public debug: boolean = true;
 	public perlDebugger: DebugSession;
 	public streamCatcher: StreamCatcher;
 	public perlVersion: string;
@@ -118,6 +143,7 @@ export class perlDebuggerConnection {
 
 	private filename?: string;
 	private rootPath?: string;
+	private clientRootPath?: string;
 	private currentfile?: string;
 
 	public onOutput: Function | null = null;
@@ -170,6 +196,8 @@ export class perlDebuggerConnection {
 			if (i === 0) {
 				// Command line
 				res.command = line;
+			} else if (res.command == line) {
+				// skip duplicate Command line
 			} else if (i === res.orgData.length - 1) {
 				// DB
 				const dbX = RX.lastCommandLine.match(line);
@@ -185,7 +213,7 @@ export class perlDebuggerConnection {
 				const [, filename, ln] = findFilenameLine(line);
 				if (filename) {
 					res.name = filename;
-					res.filename = absoluteFilename(this.rootPath, filename);
+					res.filename = absoluteFilename(this.rootPath, this.clientRootPath, filename);
 					res.ln = +ln;
 				}
 
@@ -213,7 +241,7 @@ export class perlDebuggerConnection {
 						const [, filename, ln, near] = parts;
 						res.errors.push({
 							name: filename,
-							filename: absoluteFilename(this.rootPath, filename),
+							filename: absoluteFilename(this.rootPath, this.clientRootPath, filename),
 							ln: +ln,
 							message: line,
 							near: near,
@@ -230,7 +258,7 @@ export class perlDebuggerConnection {
 						const [, near, filename, ln] = parts;
 						res.errors.push({
 							name: filename,
-							filename: absoluteFilename(this.rootPath, filename),
+							filename: absoluteFilename(this.rootPath, this.clientRootPath, filename),
 							ln: +ln,
 							message: line,
 							near: near,
@@ -274,11 +302,13 @@ export class perlDebuggerConnection {
 		return res;
 	}
 
-	async launchRequest(filename: string, cwd: string, args: string[] = [], options:LaunchOptions = {}): Promise<RequestResponse> {
-		this.rootPath = cwd;
-		this.filename = filename;
-		this.currentfile = filename;
-		const sourceFile = filename;
+	async launchRequest(filename: string, cwd: string, clientRoot: string, args: string[] = [], options:LaunchOptionsSsh = {}): Promise<RequestResponse> {
+		this.rootPath = cwd.replace(/\\/g, '/');
+		this.clientRootPath = clientRoot.replace(/\\/g, '/');
+		this.filename = absoluteClientFilename(this.rootPath, this.clientRootPath, filename);
+		filename.replace(/\\/g, '/');
+		this.currentfile = this.filename;
+		const sourceFile = this.filename;
 
 		if (this.debug) console.log(`Platform: ${process.platform}`);
 		if (this.debug && options.env) {
@@ -288,19 +318,25 @@ export class perlDebuggerConnection {
 			});
 		}
 
-		// Verify file and folder existence
-		// xxx: We can improve the error handling
-		if (!fs.existsSync(sourceFile)) this.logOutput( `Error: File ${sourceFile} not found`);
-		if (cwd && !fs.existsSync(cwd)) this.logOutput( `Error: Folder ${cwd} not found`);
+		if (!options.port && !options.execSshUser && !options.execSshUser) {
+			// Verify file and folder existence
+			// xxx: We can improve the error handling
+			if (!fs.existsSync(sourceFile)) this.logOutput( `Error: File ${sourceFile} not found`);
+			if (cwd && !fs.existsSync(cwd)) this.logOutput( `Error: Folder ${cwd} not found`);
+		}
 
 		this.logOutput(`Platform: ${process.platform}`);
 		this.logOutput(`Launch "perl -d ${sourceFile}" in "${cwd}"`);
 
 
 		// xxx: add failure handling
-		if (!options.port) {
+		if (options.execSshUser || options.execSshUser) {
 			// If no port is configured then run this locally in a fork
-			this.perlDebugger = new LocalSession(filename, cwd, args, options);
+			this.perlDebugger = new SshSession(this.filename, this.clientRootPath, args, options);
+			this.logOutput(this.perlDebugger.title());
+		} else if (!options.port) {
+			// If no port is configured then run this locally in a fork
+			this.perlDebugger = new LocalSession(this.filename, cwd, args, options);
 			this.logOutput(this.perlDebugger.title());
 		} else {
 			// If port is configured then use the remote session.
@@ -315,11 +351,18 @@ export class perlDebuggerConnection {
 			this.logOutput( `Error`);
 			this.logOutput( err );
 			this.logOutput( `DUMP: ${this.perlDebugger.dump()}` );
+			if (typeof this.onException === 'function') {
+				try {
+					this.onException({ errors: [ err ]});
+				} catch (err) {
+					throw new Error(`Error in "onException" handler: ${err.message}`);
+				}
+			}
 		});
 
 		this.streamCatcher.launch(this.perlDebugger.stdin, this.perlDebugger.stderr);
 
-		// this.streamCatcher.debug = this.debug;
+		this.streamCatcher.debug = this.debug;
 
 		// Handle program output
 		this.perlDebugger.stdout.on('data', (buffer) => {
@@ -384,7 +427,8 @@ export class perlDebuggerConnection {
 
 	async relativePath(filename: string) {
 		await this.streamCatcher.isReady();
-		return filename && filename.replace(`${this.rootPath}${sep}`, '');
+		//return filename && filename.replace(`${this.rootPath}${sep}`, '');
+		return relativeFilename(this.rootPath, this.clientRootPath, filename) ;
 	}
 
 	async setFileContext(filename: string = this.filename) {
@@ -581,7 +625,7 @@ export class perlDebuggerConnection {
 
 			if (m !== null) {
 				const [, v, caller, name, ln] = m;
-				const filename = absoluteFilename(this.rootPath, name);
+				const filename = absoluteFilename(this.rootPath, this.clientRootPath, name);
 				result.push({
 					v,
 					name,

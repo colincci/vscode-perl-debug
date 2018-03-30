@@ -62,6 +62,28 @@ eg.:
 ```
 *`localhost` should be replaced by the ip address*
 
+### Remote debugger via ssh
+
+Instead of launching the remote program and the debug session, you can start the debugee via ssh.
+Add the following settings to your  `launch.json`
+
+            "sshCmd":  "c:\\Program Files (x86)\\PuTTY\\plink.exe",
+            "sshUser": "root",
+            "sshAddr": "192.168.247.74"
+
+`sshCmd` is optional. It defaults to `plink` on windows and `ssh` on all other systems
+
+### Converting path while remote debugging
+
+To convert the path from local path to the path on the remote system add the following settings:
+
+            "root": "${workspaceRoot}",
+            "clientRoot": "/path/to/ws",
+
+e.g. if `${workspaceRoot}` is `\\192.168.247.74\share\path\to\ws` you set `clientRoot` to this path on
+the remote system e.g. `/path/to/ws` . This will make sure files are matched on local an remote system.
+This is especially importand to be able to set breakpoints and show the right location in the source.
+
 ### Stability
 
 Tests matrix running between os and perl versions:

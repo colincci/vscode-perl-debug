@@ -41,5 +41,11 @@
 			"program": "${workspaceFolder}/${command.AskForProgramName}",
 			"stopOnEntry": true
 		}
-	]
+	],
+	"compounds": [
+        {
+            "name": "Server/Client",
+            "configurations": ["Run Extension", "Run Server"]
+        }
+    ]
 }

@@ -123,10 +123,35 @@
                 "description": "List of arguments passed on to the executable.",
                 "default": []
               },
+              "sshCmd": {
+                "type": "string",
+                "description": "Ssh executable. Default plink on windows, all other ssh.",
+                "default": null
+              },
+              "sshArgs": {
+                "type": "array",
+                "description": "List of arguments passed on to the ssh executable.",
+                "default": []
+              },
+              "sshUser": {
+                "type": "string",
+                "description": "SSH Username.",
+                "default": null
+              },
+              "sshAddr": {
+                "type": "string",
+                "description": "Remote address to connect to via ssh.",
+                "default": null
+              },
               "root": {
                 "type": "string",
                 "description": "Workspace root.",
                 "default": "${workspaceFolder}/"
+              },
+              "clientRoot": {
+                "type": "string",
+                "description": "Workspace root on client side for remote debugging.",
+                "default": null
               },
               "program": {
                 "type": "string",

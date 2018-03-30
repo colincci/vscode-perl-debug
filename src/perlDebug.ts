@@ -22,9 +22,19 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
 	exec: string;
 	/** Binary executable arguments */
 	execArgs: string[],
+	/** ssh binary */
+	sshCmd: string;
+	/** ssh binary executable arguments */
+	sshArgs: string[],
+	/** ssh user */
+	sshUser: string;
+	/** ssh remote ip addr */
+	sshAddr: string,
 	/** Workspace path */
 	root: string,
-	/** An absolute path to the program to debug. */
+	/** Root of client, network prefix e.g. \\1.2.3.4\share */
+	clientRoot: string,
+	/** An absolute path (on client) to the program to debug. */
 	program: string;
 	/** Automatically stop target after launch. If not specified, target does not stop. */
 	stopOnEntry?: boolean;
@@ -143,7 +153,7 @@ class PerlDebugSession extends LoggingDebugSession {
 		logger.setup(args.trace ? Logger.LogLevel.Verbose : Logger.LogLevel.Stop, false);
 
 		await this._configurationDone.wait(1000);
-		this.perlDebugger.launchRequest(args.program, args.root, execArgs, {
+		this.perlDebugger.launchRequest(args.program, args.root, args.clientRoot, execArgs, {
 			exec: args.exec,
 			args: programArguments,
 			env: {
@@ -153,6 +163,11 @@ class PerlDebugSession extends LoggingDebugSession {
 				...args.env
 			},
 			port: args.port || undefined,
+			execSsh:    args.sshCmd,
+			execSshArgs: args.sshArgs,
+			execSshUser: args.sshUser,
+			execSshAddr: args.sshAddr,
+			execSshEnv:  args.env,
 		})
 			.then((res) => {
 				if (args.stopOnEntry) {
