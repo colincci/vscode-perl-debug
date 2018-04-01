@@ -104,10 +104,14 @@ function absoluteClientFilename(root: string, clientRoot: string, filename: stri
 
 	filename = filename.replace(/\\/g, '/');
 	if (clientRoot) {
-		const fullPath = filename.replace(root, clientRoot) ;
-		return fullPath ;
+		if (filename.match(/^\//)) {
+			const fullPath = filename.replace(root, clientRoot) ;
+			return fullPath ;
+		} else {
+			const fullPath = clientRoot + '/' + filename ;
+			return fullPath ;
+		}
 	}
-
 	return absoluteFilename(root, clientRoot, filename) ;
 }
 
@@ -305,8 +309,8 @@ export class perlDebuggerConnection {
 	}
 
 	async launchRequest(filename: string, cwd: string, clientRoot: string, args: string[] = [], options:LaunchOptionsSsh = {}): Promise<RequestResponse> {
-		this.rootPath = cwd.replace(/\\/g, '/');
-		this.clientRootPath = clientRoot.replace(/\\/g, '/');
+		this.rootPath = cwd.replace(/\\/g, '/').replace(/\/+$/, '') ;
+		this.clientRootPath = clientRoot.replace(/\\/g, '/').replace(/\/+$/, '') ;
 		this.filename = absoluteClientFilename(this.rootPath, this.clientRootPath, filename);
 		filename.replace(/\\/g, '/');
 		this.currentfile = this.filename;
@@ -456,20 +460,21 @@ export class perlDebuggerConnection {
 		// const command = filename ? `b ${filename}:${ln}` : `b ${ln}`;
 		// const res = await this.request(`b ${ln}`);
 
-		return Promise.all([this.setFileContext(filename), this.request(`b ${ln}`)])
-			.then(result => {
-				const res = <RequestResponse>result.pop();
-				if (this.debug) console.log(res);
-				if (res.data.length) {
-					if (/not breakable\.$/.test(res.data[0])) {
-						throw new Error(res.data[0] + ' ' + filename + ':' + ln);
-					}
-					if (/not found\.$/.test(res.data[0])) {
-						throw new Error(res.data[0] + ' ' + filename + ':' + ln);
-					}
-				}
-				return res;
-			});
+		filename = absoluteClientFilename(this.rootPath, this.clientRootPath, filename);
+
+		const res1 = await this.setFileContext(filename) ;
+		const res  = await this.request(`b ${ln}`);
+		if (this.debug) { console.log(res); }
+
+		if (res.data.length) {
+			if (/not breakable\.$/.test(res.data[0])) {
+				throw new Error(res.data[0] + ' ' + filename + ':' + ln);
+			}
+			if (/not found\.$/.test(res.data[0])) {
+				throw new Error(res.data[0] + ' ' + filename + ':' + ln);
+			}
+		}
+		return res;
 	}
 
 	async getBreakPoints() {
