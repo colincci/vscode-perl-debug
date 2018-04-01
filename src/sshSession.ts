@@ -36,8 +36,8 @@ export class SshSession implements DebugSession {
 			envStr += ' ' + element+ "='" + options.execSshEnv[element] + "'"	;
 		}
 		var argsStr = '' ;
-		for (var element in programArguments) {
-			argsStr += " '" + element + "'"	;
+		for (var i = 0 ; i < programArguments.length; i++) {
+			argsStr += " '" + programArguments[i] + "'"	;
 		}
 		if (!sshCommand)
 			if (/^win/.test(process.platform))
