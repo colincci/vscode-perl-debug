@@ -146,6 +146,8 @@ export class perlDebuggerConnection {
 	private clientRootPath?: string;
 	private currentfile?: string;
 
+	private variables: ParsedVariableScope = {};
+
 	public onOutput: Function | null = null;
 	public onError: Function | null = null;
 	public onClose: Function | null = null;
@@ -529,14 +531,10 @@ export class perlDebuggerConnection {
 		return await this.request('R');
 	}
 
-	async getVariableReference(name: string): Promise<string> {
-		const res = await this.request(`print STDERR \\${name}`);
-		return res.data[0];
-	}
-
-	async getExpressionValue(expression: string): Promise<string> {
-		const res = await this.request(`print STDERR ${expression}`);
-		return res.data.pop();
+	async getExpressionValue(expression: string, level: number): Promise<string> {
+		level = level + 1 ;
+		const res = await this.request(`p do{my\$v=PadWalker::peek_my(${level})->{'${expression}'}//PadWalker::peek_our(${level})->{'${expression}'};ref($v)eq'SCALAR'||ref($v)eq'REF'?$$v:$v}`);
+		return res.data[0] ;
 	}
 
 	private fixLevel(level: number) {
@@ -554,9 +552,20 @@ export class perlDebuggerConnection {
 	 * Prints out a nice indent formatted list of variables with
 	 * array references resolved.
 	 */
-	async requestVariableOutput(level: number) {
+	async requestVariableOutput(level, id: string) {
 		const variables: Variable[] = [];
-		const res = await this.request(`y ${this.fixLevel(level)}`);
+		let res ;
+		if (id.substr(0,1) === '#') {
+			level++ ;
+			res = await this.request('y ' + level);
+		} else if (id.substr(0,1) === '=') {
+			res = await this.request('V ' +  level + ' !^::(?:INC|ENV|SIG|[\\x00-\\x40_~^|\\\\\\]\\[].*)$');
+		} else if (id.substr(0,1) === '-') {
+			res = await this.request('V ' +  level + ' ~^::(?:INC|ENV|SIG|[\\x00-\\x40_~^|\\\\\\]\\[].*)$');
+		} else {
+			return [] ;
+		}
+
 		const result = [];
 
 		if (/^Not nested deeply enough/.test(res.data[0])) {
@@ -572,7 +581,7 @@ export class perlDebuggerConnection {
 			const line = res.data[i];
 			if (/\($/.test(line)) {
 				const name = line.split(' = ')[0];
-				const reference = await this.getVariableReference(name);
+				const reference = await this.getExpressionValue(name, level);
 				result.push(`${name} = ${reference}`);
 			} else if (line !== ')') {
 				result.push(line);
@@ -582,8 +591,8 @@ export class perlDebuggerConnection {
 		return result;
 	}
 
-	async getVariableList(level: number, scopeName?: string): Promise<ParsedVariableScope> {
-		const variableOutput = await this.requestVariableOutput(level);
+	async getVariableList(level, scopeName?: string): Promise<ParsedVariableScope> {
+		const variableOutput = await this.requestVariableOutput(level, scopeName);
 		//console.log('RESOLVED:');
 		//console.log(variableOutput);
 		return variableParser(variableOutput, scopeName);
@@ -594,7 +603,7 @@ export class perlDebuggerConnection {
 		// instead of being empty.
 		if (!this.padwalkerVersion) {
 			return {
-				local_0: [{
+				"#0": [{
 					name: 'PadWalker',
 					value: 'Not installed',
 					type: 'string',
@@ -609,19 +618,22 @@ export class perlDebuggerConnection {
 		for (let i = 0; i < keys.length; i++) {
 			const name = keys[i];
 			const level = scopes[name];
-			Object.assign(result, await this.getVariableList(level, name));
+			if (this.variables[name]) { continue }
+			Object.assign(this.variables, await this.getVariableList(level, name));
 		}
-		return result;
+		return this.variables ;
 	}
 
 	async getStackTrace(): Promise<StackFrame[]> {
 		const res = await this.request('T');
 		const result: StackFrame[] = [];
 
+		this.variables = {} ;
+
 		res.data.forEach((line, i) => {
 			// > @ = DB::DB called from file 'lib/Module2.pm' line 5
 			// > . = Module2::test2() called from file 'test.pl' line 12
-			const m = line.match(/^(\S+) = (\S+) called from file \'(\S+)\' line ([0-9]+)$/);
+			const m = line.match(/^(\S+) = (.+?) called from file \'(.+?)\' line ([0-9]+)$/);
 
 			if (m !== null) {
 				const [, v, caller, name, ln] = m;
@@ -630,14 +642,21 @@ export class perlDebuggerConnection {
 					v,
 					name,
 					filename,
-					caller,
+					caller: '',
 					ln: +ln,
 				});
+				if (result.length > 1) {
+					result[result.length-2].caller = caller ;
+				}
 			}
 
 		});
 
-		return result;
+	if (result.length > 0) {
+		result[result.length-1].caller = "main::" ;
+	}
+
+	return result;
 	}
 
 	async watchExpression(expression) {

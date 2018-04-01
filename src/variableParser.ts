@@ -76,7 +76,7 @@ interface VariableSearchResult {
 	parentName: string | number,
 }
 
-function findVariableReference(variables: ParsedVariableScope, variablesReference: string): VariableSearchResult | null {
+function findVariableReference(variables: ParsedVariableScope, value: string): VariableSearchResult | null {
 	const variableScopes = Object.keys(variables);
 	let parentName = 0;
 	let variable: ParsedVariable | null = null;
@@ -86,7 +86,7 @@ function findVariableReference(variables: ParsedVariableScope, variablesReferenc
 		for (let b = 0; b < scope.length; b++) {
 			variable = scope[b];
 			// Check if we found the needle
-			if (variable.variablesReference === variablesReference) {
+			if (variable.value === value) {
 				return {
 					variable,
 					parentName,
@@ -97,7 +97,7 @@ function findVariableReference(variables: ParsedVariableScope, variablesReferenc
 	return null;
 }
 
-const topScope = /global_0|local_0|closure_0/;
+const topScope = /=main|-main|#0/;
 
 export function resolveVariable(name, variablesReference, variables) {
 	// Resolve variables
@@ -163,24 +163,26 @@ export default function(data: string[], scopeName: string = '0'): ParsedVariable
 
 		try {
 			const [name, value] = line.match(/^([\s+]{0,})(\S+) =?>? ([\S\s]+)/).splice(2, 2);
-			if (contextIndent > lineIndent) {
-				context.splice(0, contextIndent - lineIndent);
-			} else if (contextIndent < lineIndent) {
-				context.unshift(lastReference);
+			if (!/^FileHandle\(/.test(name)) {
+				if (contextIndent > lineIndent) {
+					context.splice(0, contextIndent - lineIndent);
+				} else if (contextIndent < lineIndent) {
+					context.unshift(lastReference);
+				}
+				// Check the indent poping / pushing context
+				// console.log(lineIndent, line, `Context: "${context[0]}"`);
+
+				// Ensure reference container
+				if (typeof result[context[0]] === 'undefined') {
+					result[context[0]] = [];
+				}
+
+				// Push variable to reference container
+				result[context[0]].push(createVariable(name, value));
+
+				// Post
+				lastReference = value;
 			}
-			// Check the indent poping / pushing context
-			// console.log(lineIndent, line, `Context: "${context[0]}"`);
-
-			// Ensure reference container
-			if (typeof result[context[0]] === 'undefined') {
-				result[context[0]] = [];
-			}
-
-			// Push variable to reference container
-			result[context[0]].push(createVariable(name, value));
-
-			// Post
-			lastReference = value;
 		} catch(err) {
 			// TODO: Figure out why this happens...
 			// console.log('ERR:', line);

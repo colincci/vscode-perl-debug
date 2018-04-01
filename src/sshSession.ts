@@ -45,7 +45,7 @@ export class SshSession implements DebugSession {
 			else
 				sshCommand = 'ssh' ;
 
-		const remoteCmd   = "cd '" + cwd + "'; COLUMNS=80 LINES=25 " + envStr + ' ' + perlCommand + " -d '" + filename + "' " + argsStr ;
+		const remoteCmd   = "cd '" + cwd + "'; COLUMNS=255 LINES=25 " + envStr + ' ' + perlCommand + " -d '" + filename + "' " + argsStr ;
 		const commandArgs = [].concat(sshArgs, ['-l', sshUser, sshAddr, remoteCmd]);
 
 		const spawnOptions = {

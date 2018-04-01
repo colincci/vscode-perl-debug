@@ -68,6 +68,7 @@ class PerlDebugSession extends LoggingDebugSession {
 	private _functionBreakPoints: string[] = [];
 
 	private _variableHandles = new Handles<string>();
+	private _stackFrames: StackFrame[] = [];
 
 	private perlDebugger = new perlDebuggerConnection();
 
@@ -125,6 +126,9 @@ class PerlDebugSession extends LoggingDebugSession {
 
 				// make VS Code to show a 'step back' button
 				response.body.supportsStepBack = false;
+
+				// The debug adapter supports setting a variable to a value.
+				response.body.supportsSetVariable = true ;
 
 				response.body.supportsFunctionBreakpoints = false;
 
@@ -538,9 +542,14 @@ class PerlDebugSession extends LoggingDebugSession {
 	protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {
 		const frameReference = args.frameId;
 		const scopes = new Array<Scope>();
-		scopes.push(new Scope("Local", this._variableHandles.create("local_" + frameReference), false));
-		scopes.push(new Scope("Closure", this._variableHandles.create("closure_" + frameReference), false));
-		scopes.push(new Scope("Global", this._variableHandles.create("global_" + frameReference), true));
+		scopes.push(new Scope("Local", this._variableHandles.create("#" + frameReference), false));
+		if (this._stackFrames.length > frameReference) {
+			const pkg = this._stackFrames[frameReference].name.replace(/::[^:]*$/,'') ;
+			if (pkg) {
+				scopes.push(new Scope("Global", this._variableHandles.create("=" + pkg), true));
+				scopes.push(new Scope("Special", this._variableHandles.create("-" + pkg), true));
+			}
+		}
 
 		response.body = {
 			scopes: scopes
@@ -550,11 +559,13 @@ class PerlDebugSession extends LoggingDebugSession {
 
 	private getVariableName(name: string, variablesReference: number): Promise<string> {
 		let id = this._variableHandles.get(variablesReference);
-		return this.perlDebugger.variableList({
-			global_0: 0,
-			local_0: 1,
-			closure_0: 2,
-		})
+
+		const type = id.substr(0,1) ;
+		const arg  = id.substr(1) ;
+		const scopes = {} ;
+		scopes[id] = arg ;
+
+		return this.perlDebugger.variableList(scopes)
 		.then(variables => {
 			return resolveVariable(name, id, variables);
 		});
@@ -566,12 +577,13 @@ class PerlDebugSession extends LoggingDebugSession {
 	protected variablesRequest(response: DebugProtocol.VariablesResponse, args: DebugProtocol.VariablesArguments): void {
 		const id = this._variableHandles.get(args.variablesReference);
 
-		this.perlDebugger.variableList({
-			global_0: 0,
-			local_0: 1,
-			closure_0: 2,
-		})
-			.then(variables => {
+		const type = id.substr(0,1) ;
+		const arg  = id.substr(1) ;
+		const scopes = {} ;
+		scopes[id] = arg ;
+
+		this.perlDebugger.variableList(scopes)
+					.then(variables => {
 				const result = [];
 
 				if (id != null && variables[id]) {
@@ -580,6 +592,8 @@ class PerlDebugSession extends LoggingDebugSession {
 						// Convert the parsed variablesReference into Variable complient references
 						if (variable.variablesReference === '0') {
 							variable.variablesReference = 0;
+						} else if (!isNaN(Number(variable.variablesReference))) {
+							variable.variablesReference = Number(variable.variablesReference) ;
 						} else {
 							variable.variablesReference = this._variableHandles.create(`${variable.variablesReference}`);
 						}
@@ -587,7 +601,7 @@ class PerlDebugSession extends LoggingDebugSession {
 					});
 
 					response.body = {
-						variables: <Variable[]>result
+						variables: <Variable[]>result.sort ((a,b) => { if (a.name > b.name) { return 1 } if (a.name < b.name) { return -1 } return 0 })
 					};
 					this.sendResponse(response);
 				} else {
@@ -597,41 +611,6 @@ class PerlDebugSession extends LoggingDebugSession {
 			.catch(() => {
 				this.sendResponse(response);
 			});
-	}
-
-	/**
-	 * Evaluate hover
-	 */
-	private evaluateHover(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments) {
-		if (/^[\$|\@]/.test(args.expression)) {
-			const expression = args.expression.replace(/\.(\'\w+\'|\w+)/g, (...a) => `->{${a[1]}}`);
-
-			this.perlDebugger.getExpressionValue(expression)
-				.then(result => {
-					if (/^HASH/.test(result)) {
-						response.body = {
-							result: result,
-							variablesReference: this._variableHandles.create(result),
-							type: 'string'
-						};
-					} else {
-						response.body = {
-							result: result,
-							variablesReference: 0
-						};
-					}
-					this.sendResponse(response);
-				})
-				.catch(() => {
-					response.body = {
-						result: undefined,
-						variablesReference: 0
-					};
-					this.sendResponse(response);
-				});
-		} else {
-			this.sendResponse(response);
-		}
 	}
 
 
@@ -662,22 +641,20 @@ class PerlDebugSession extends LoggingDebugSession {
 	/**
 	 * Fetch expression value
 	 */
-	async fetchExpressionRequest(clientExpression): Promise<any> {
+	async fetchExpressionRequest(clientExpression, level): Promise<any> {
 
 		const isVariable = /^([\$|@|%])([a-zA-Z0-9_\'\.]+)$/.test(clientExpression);
 
 		const expression = isVariable ? clientExpression.replace(/\.(\'\w+\'|\w+)/g, (...a) => `->{${a[1]}}`) : clientExpression;
 
-		let value = await this.perlDebugger.getExpressionValue(expression);
+		let value = await this.perlDebugger.getExpressionValue(expression, level);
 		if (/^Can\'t use an undefined value as a HASH reference/.test(value)) {
 			value = undefined;
 		}
-
-		const reference = isVariable ? await this.perlDebugger.getVariableReference(expression) : null;
-		if (typeof value !== 'undefined' && /^HASH|ARRAY/.test(reference)) {
+		if (/^(?:HASH|ARRAY)/.test(value)) {
 			return {
-				value: reference,
-				reference: reference,
+				value: value,
+				reference: this._variableHandles.create(`${value}`),
 			};
 		}
 		return {
@@ -687,18 +664,27 @@ class PerlDebugSession extends LoggingDebugSession {
 	}
 
 	/**
-	 * Evaluate watch
+	 * Evaluate watch/hover
 	 * Note: We don't actually levarage the debugger watch capabilities yet
 	 */
-	protected evaluateWatch(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
+	protected evaluateVariable(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): void {
+
 		// Clear watch if last request wasn't setting a watch?
-		this.fetchExpressionRequest(args.expression)
+		let level = args.frameId + 1 ;
+		this.fetchExpressionRequest(args.expression, level)
 			.then(result => {
-				// this.sendEvent(new OutputEvent(`${args.expression}=${result.value} ${typeof result.value} ${result.reference}$')\n`));
+				let ref : number ;
 				if (typeof result.value !== 'undefined') {
-					response.body = {
+					if (result.reference == 0) {
+						ref = 0;
+					} else if (!isNaN(Number(result.reference))) {
+						ref = Number(result.reference) ;
+					} else {
+						ref = this._variableHandles.create(result.reference);
+					}
+				response.body = {
 						result: result.value,
-						variablesReference: result.reference === null ? 0 : this._variableHandles.create(result.reference),
+						variablesReference: ref,
 					};
 				}
 				this.sendResponse(response);
@@ -714,9 +700,9 @@ class PerlDebugSession extends LoggingDebugSession {
 		if (args.context === 'repl') {
 			this.evaluateCommandLine(response, args);
 		} else if (args.context === 'hover') {
-			this.evaluateHover(response, args);
+			this.evaluateVariable(response, args);
 		} else if (args.context === 'watch') {
-			this.evaluateWatch(response, args);
+			this.evaluateVariable(response, args);
 		} else {
 			this.sendEvent(new OutputEvent(`evaluate(context: '${args.context}', '${args.expression}')`));
 			response.body = {
@@ -748,6 +734,7 @@ class PerlDebugSession extends LoggingDebugSession {
 		});
 
 		if (endFrame) frames.unshift(endFrame);
+		this._stackFrames = frames;
 
 		response.body = {
 			stackFrames: frames,
