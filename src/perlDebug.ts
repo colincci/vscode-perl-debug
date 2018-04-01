@@ -544,7 +544,11 @@ class PerlDebugSession extends LoggingDebugSession {
 		const scopes = new Array<Scope>();
 		scopes.push(new Scope("Local", this._variableHandles.create("#" + frameReference), false));
 		if (this._stackFrames.length > frameReference) {
-			const pkg = this._stackFrames[frameReference].name.replace(/::[^:]*$/,'') ;
+			var frameName = this._stackFrames[frameReference].name ;
+			var n ;
+			if ((n = frameName.match(/^.+?\(/)))
+				frameName = n[0] ;
+			const pkg = frameName.replace(/::[^:]*$/,'') ;
 			if (pkg) {
 				scopes.push(new Scope("Global", this._variableHandles.create("=" + pkg), true));
 				scopes.push(new Scope("Special", this._variableHandles.create("-" + pkg), true));

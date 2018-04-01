@@ -532,6 +532,12 @@ export class perlDebuggerConnection {
 	}
 
 	async getExpressionValue(expression: string, level: number): Promise<string> {
+		if (isNaN(Number(level))) {
+			let name = expression.substr (0, 1) + level + '::' + expression.substr (1) ;
+			const res = await this.request(`p \\${name}`);
+			return res.data[0];
+		}
+
 		level = level + 1 ;
 		const res = await this.request(`p do{my\$v=PadWalker::peek_my(${level})->{'${expression}'}//PadWalker::peek_our(${level})->{'${expression}'};ref($v)eq'SCALAR'||ref($v)eq'REF'?$$v:$v}`);
 		return res.data[0] ;
