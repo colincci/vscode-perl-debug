@@ -79,10 +79,6 @@ function variableValue(val: string): any {
 function absoluteFilename(root: string, clientRoot: string, filename: string): string {
 
 	filename = filename.replace(/\\/g, '/');
-	if (clientRoot) {
-		const fullPath = filename.replace(clientRoot, root) ;
-		return fullPath ;
-	}
 
 	// if it's already absolute then return
 	if (fs.existsSync(filename)) {
@@ -115,26 +111,19 @@ function absoluteClientFilename(root: string, clientRoot: string, filename: stri
 	return absoluteFilename(root, clientRoot, filename) ;
 }
 
-function relativeFilename(root: string, clientRoot: string, filename: string): string {
+function absoluteServerFilename(root: string, clientRoot: string, filename: string): string {
+
 	filename = filename.replace(/\\/g, '/');
 	if (clientRoot) {
-		const relName = filename.replace(root, '').replace(/^[\/|\\]/, '');
-		return relName ;
+		if (filename.match(/^\//)) {
+			const fullPath = filename.replace(clientRoot, root) ;
+			return fullPath ;
+		} else {
+			const fullPath = root + '/' + filename ;
+			return fullPath ;
+		}
 	}
-
-	// If already relative to root
-	if (fs.existsSync(join(root, filename))) {
-		return filename;
-	}
-	// Try to create relative filename
-	// ensure trailing separator in root path eg. /foo/
-	const relName = filename.replace(root, '').replace(/^[\/|\\]/, '');
-	if (fs.existsSync(join(root, relName))) {
-		return relName;
-	}
-
-	// We might need to add more cases
-	return filename;
+	return absoluteFilename(root, clientRoot, filename) ;
 }
 
 export class perlDebuggerConnection {
@@ -221,7 +210,7 @@ export class perlDebuggerConnection {
 				const [, filename, ln] = findFilenameLine(line);
 				if (filename) {
 					res.name = filename;
-					res.filename = absoluteFilename(this.rootPath, this.clientRootPath, filename);
+					res.filename = absoluteServerFilename(this.rootPath, this.clientRootPath, filename);
 					res.ln = +ln;
 				}
 
@@ -249,7 +238,7 @@ export class perlDebuggerConnection {
 						const [, filename, ln, near] = parts;
 						res.errors.push({
 							name: filename,
-							filename: absoluteFilename(this.rootPath, this.clientRootPath, filename),
+							filename: absoluteServerFilename(this.rootPath, this.clientRootPath, filename),
 							ln: +ln,
 							message: line,
 							near: near,
@@ -266,7 +255,7 @@ export class perlDebuggerConnection {
 						const [, near, filename, ln] = parts;
 						res.errors.push({
 							name: filename,
-							filename: absoluteFilename(this.rootPath, this.clientRootPath, filename),
+							filename: absoluteServerFilename(this.rootPath, this.clientRootPath, filename),
 							ln: +ln,
 							message: line,
 							near: near,
@@ -438,10 +427,12 @@ export class perlDebuggerConnection {
 		return this.parseResponse(await this.streamCatcher.request(command));
 	}
 
-	async relativePath(filename: string) {
-		await this.streamCatcher.isReady();
-		//return filename && filename.replace(`${this.rootPath}${sep}`, '');
-		return relativeFilename(this.rootPath, this.clientRootPath, filename) ;
+	clientPath(filename: string) {
+		return absoluteClientFilename(this.rootPath, this.clientRootPath, filename) ;
+	}
+
+	serverPath(filename: string) {
+		return absoluteServerFilename(this.rootPath, this.clientRootPath, filename) ;
 	}
 
 	async setFileContext(filename: string = this.filename) {
@@ -481,6 +472,20 @@ export class perlDebuggerConnection {
 				throw new Error(res.data[0] + ' ' + filename + ':' + ln);
 			}
 		}
+		return res;
+	}
+
+	async setLoadBreakPoint(filename?: string): Promise<RequestResponse> {
+		// xxx: We call `b ${filename}:${ln}` but this will not complain
+		// about files not found - this might be ok for now
+		// await this.setFileContext(filename);
+		// const command = filename ? `b ${filename}:${ln}` : `b ${ln}`;
+		// const res = await this.request(`b ${ln}`);
+
+		filename = absoluteClientFilename(this.rootPath, this.clientRootPath, filename);
+
+		const res  = await this.request(`b load ${filename}`);
+		if (this.debug) { console.log(res); }
 		return res;
 	}
 
@@ -658,7 +663,7 @@ export class perlDebuggerConnection {
 
 			if (m !== null) {
 				const [, v, caller, name, ln] = m;
-				const filename = absoluteFilename(this.rootPath, this.clientRootPath, name);
+				const filename = absoluteServerFilename(this.rootPath, this.clientRootPath, name);
 				result.push({
 					v,
 					name,

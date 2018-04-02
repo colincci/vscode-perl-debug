@@ -72,6 +72,8 @@ class PerlDebugSession extends LoggingDebugSession {
 
 	private perlDebugger = new perlDebuggerConnection();
 
+	private _isRunning: boolean = false ;
+
 	public constructor() {
 		super('perl_debugger.log');
 
@@ -420,10 +422,10 @@ class PerlDebugSession extends LoggingDebugSession {
 	 */
 	private async setBreakPointsRequestAsync(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): Promise<DebugProtocol.SetBreakpointsResponse> {
 
-		var path = args.source.path;
+		var path = this.perlDebugger.serverPath(args.source.path);
 		var clientLines = args.lines;
 
-		const debugPath = await this.perlDebugger.relativePath(path);
+		const debugPath = await this.perlDebugger.clientPath(path);
 		const editorExisting = this._breakPoints.get(path);
 		const editorBPs: number[] = args.lines.map(ln => ln);
 		const dbp = await this.perlDebugger.getBreakPoints();
@@ -431,6 +433,7 @@ class PerlDebugSession extends LoggingDebugSession {
 		const createBP: number[] = [];
 		const removeBP: number[] = [];
 		var breakpoints = new Array<Breakpoint>();
+		var postpone = false ;
 
 		// Clean up debugger removing unset bps
 		for (let i = 0; i < debuggerPBs.length; i++) {
@@ -453,6 +456,7 @@ class PerlDebugSession extends LoggingDebugSession {
 					const bp = <DebugProtocol.Breakpoint> new Breakpoint(false, ln);
 					bp.id = this._breakpointId++;
 					breakpoints.push(bp);
+					postpone = true ;
 				}
 			} else {
 				// This is good
@@ -464,6 +468,10 @@ class PerlDebugSession extends LoggingDebugSession {
 
 		this._breakPoints.set(path, breakpoints);
 
+		if (postpone) {
+			await this.perlDebugger.setLoadBreakPoint (debugPath) ;
+		}
+
 		// send back the actual breakpoint positions
 		response.body = {
 			breakpoints: breakpoints
@@ -473,10 +481,54 @@ class PerlDebugSession extends LoggingDebugSession {
 	}
 
 	protected setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): void {
+		var wasRunning = false ;
+		if (this._isRunning) {
+			this.perlDebugger.pause() ;
+			wasRunning = true ;
+		}
+
 		this.setBreakPointsRequestAsync(response, args)
-			.then(res => this.sendResponse(res))
+			.then(res => {
+				this.sendResponse(res)
+				if (wasRunning) {
+					this.continueRequest(null, null) ;
+				}
+			})
 			.catch(err => this.sendResponse(response));
+
 	}
+
+	protected async setBreakPointsForFile(path: string): Promise<number> {
+		const debugPath = await this.perlDebugger.clientPath(path);
+		const editorExisting = this._breakPoints.get(path) || [] ;
+		const debuggerPBs: number[] = (await this.perlDebugger.getBreakPoints())[debugPath] || [];
+		var breakpoints = new Array<Breakpoint>();
+
+		// Add missing bps to the debugger
+		for (let i = 0; i < editorExisting.length; i++) {
+		 	var bp: DebugProtocol.Breakpoint = editorExisting[i];
+			if (debuggerPBs.indexOf(bp.line) < 0) {
+				try {
+					const res = await this.perlDebugger.setBreakPoint(bp.line, debugPath);
+					bp.verified = true;
+					breakpoints.push(bp);
+					this.sendEvent(new BreakpointEvent('changed', bp));
+				} catch(err) {
+					bp.verified = false;
+					breakpoints.push(bp);
+				}
+			} else {
+				// This is good
+				breakpoints.push(bp);
+			}
+		}
+
+		this._breakPoints.set(path, breakpoints);
+
+		return 0 ;
+	}
+
+
 
 	/**
 	 * Next
@@ -515,20 +567,33 @@ class PerlDebugSession extends LoggingDebugSession {
 	 */
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
 		this.sendEvent(new ContinuedEvent(PerlDebugSession.THREAD_ID));
+		this._isRunning = true ;
 		this.perlDebugger.request('c')
 			.then((res) => {
+				this._isRunning = false ;
+				var loaded: string[] ;
 				if (res.ln) {
 					this._currentLine = this.convertDebuggerLineToClient(res.ln);
 				}
-				this.sendResponse(response);
+				if (response)
+					this.sendResponse(response);
 
 				if (res.finished) {
 					this.sendEvent(new TerminatedEvent());
+				} else if (loaded = res.data[0].match (/'(.+?)' loaded/)) {
+					const path = this.perlDebugger.serverPath(loaded[1]);
+					this.setBreakPointsForFile (path).then(() => {
+						this.continueRequest (response, args) ;
+					})
+					.catch((err) => {
+						this.sendEvent(new OutputEvent(`ERR>Set Breakpoint for  ${loaded[0]}\n`));
+					}) ;
 				} else {
 					this.sendEvent(new StoppedEvent("breakpoint", PerlDebugSession.THREAD_ID));
 				}
 			})
 			.catch((err) => {
+				this._isRunning = false ;
 				const [ error = err ] = err.errors || [];
 				if (err.exception) {
 					this.sendEvent(new StoppedEvent("exception", PerlDebugSession.THREAD_ID, error.near));
@@ -536,7 +601,8 @@ class PerlDebugSession extends LoggingDebugSession {
 					this.sendEvent(new OutputEvent(`ERR>Continue error: ${error.message}\n`));
 					this.sendEvent(new TerminatedEvent());
 				}
-				this.sendResponse(response);
+				if (response)
+					this.sendResponse(response);
 			});
 	}
 
