@@ -8,6 +8,7 @@ export interface DebugSession {
 	on: Function, // support "close", "error"
 	title: Function,
 	dump: Function, // Dump debug information
+	interrupt: Function, // send CTRL-C (SIGINT) to perl debugger
 }
 
 export interface LaunchOptions {

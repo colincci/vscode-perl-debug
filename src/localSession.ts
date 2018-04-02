@@ -37,4 +37,8 @@ export class LocalSession implements DebugSession {
 		this.title = () => `${perlCommand} ${commandArgs.join(' ')}`;
 		this.dump = () => `spawn(${perlCommand}, ${JSON.stringify(commandArgs)}, ${JSON.stringify(spawnOptions)});`;
 	}
+
+	interrupt () {
+		this.kill ('SIGINT') ; //????
+	}
 }

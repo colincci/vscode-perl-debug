@@ -95,4 +95,8 @@ export class RemoteSession implements DebugSession {
 		this.title = () => `Running debug server for remote session to connect on port "${port}"`;
 		this.dump = () => `debug server port ${port}`;
 	}
+
+	interrupt () {
+		this.stdout.push(`Interrupt/Pause not supported yet on remote debugger`);
+	}
 }

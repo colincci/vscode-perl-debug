@@ -143,6 +143,7 @@ export class perlDebuggerConnection {
 	public streamCatcher: StreamCatcher;
 	public perlVersion: string;
 	public padwalkerVersion: string;
+	public childPID : number ;
 	public commandRunning: string = '';
 
 	private filename?: string;
@@ -157,6 +158,7 @@ export class perlDebuggerConnection {
 	public onClose: Function | null = null;
 	public onException: Function | null = null;
 	public onTermination: Function | null = null;
+	public onContinued: Function | null = null;
 
 	/**
 	 * Pass in the initial script and optional additional arguments for
@@ -423,6 +425,11 @@ export class perlDebuggerConnection {
 			// inform the user of a missing dependency install of PadWalker
 		}
 
+		try {
+			this.childPID = await this.getChildPID();
+		} catch(ignore) {
+			this.logOutput(`Cannot get PID of Debugger. Pause will not work`);
+		}
 		return this.parseResponse(data);
 	}
 
@@ -526,7 +533,10 @@ export class perlDebuggerConnection {
 	async continue() {
 		return await this.request('c');
 	}
-// Next:
+	async pause() {
+		this.perlDebugger.interrupt(this.childPID) ;
+	}
+// N// Next:
 	async next() {
 		return await this.request('n');
 	}
@@ -694,6 +704,11 @@ export class perlDebuggerConnection {
 		if (/^[0-9]+\.?([0-9]?)+$/.test(version)) {
 			return version;
 		}
+	}
+
+	async getChildPID(): Promise<number> {
+		const res = await this.request('p $$');
+		return Number(res.data[0]);
 	}
 
 	async resolveFilename(filename): Promise<string> {

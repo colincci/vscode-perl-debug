@@ -20,6 +20,9 @@ export class SshSession implements DebugSession {
 	public title: Function;
 	public dump: Function;
 
+	public intSshCmd:  string ;
+	public intSshArgs: string[] ;
+
 	constructor(filename: string, cwd: string, args: string[] = [], options: LaunchOptionsSsh = {}) {
 		const perlCommand = options.exec || 'perl';
 		const programArguments = options.args || [];
@@ -60,5 +63,16 @@ export class SshSession implements DebugSession {
 		this.kill = () => session.kill();
 		this.title = () => `${sshCommand} ${commandArgs.join(' ')}`;
 		this.dump = () => `spawn(${sshCommand}, ${JSON.stringify(commandArgs)}, ${JSON.stringify(spawnOptions)});`;
+
+		this.intSshCmd = sshCommand ;
+		this.intSshArgs = [].concat(sshArgs, ['-l', sshUser, sshAddr]);
+	}
+
+	interrupt (childPID: number) {
+		const spawnOptions = {
+			detached: false,
+		};
+		var args: string[] = [].concat(this.intSshArgs, [`kill -INT ${childPID}`]);
+		spawn (this.intSshCmd, args, spawnOptions) ;
 	}
 }

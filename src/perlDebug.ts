@@ -3,7 +3,7 @@
 import {
 	Logger, logger,
 	DebugSession, LoggingDebugSession,
-	InitializedEvent, TerminatedEvent, StoppedEvent, BreakpointEvent, OutputEvent, Event,
+	InitializedEvent, TerminatedEvent, ContinuedEvent, StoppedEvent, BreakpointEvent, OutputEvent, Event,
 	Thread, StackFrame, Scope, Source, Handles, Breakpoint, Variable
 } from 'vscode-debugadapter';
 import {DebugProtocol} from 'vscode-debugprotocol';
@@ -105,6 +105,10 @@ class PerlDebugSession extends LoggingDebugSession {
 
 		this.perlDebugger.onTermination = (res) => {
 			this.sendEvent(new TerminatedEvent());
+		};
+
+		this.perlDebugger.onContinued = (res) => {
+			this.sendEvent(new ContinuedEvent(PerlDebugSession.THREAD_ID));
 		};
 
 		this.perlDebugger.onClose = (code) => {
@@ -241,13 +245,12 @@ class PerlDebugSession extends LoggingDebugSession {
 
 
 
-
 	protected pauseRequest(response: DebugProtocol.PauseResponse, args: DebugProtocol.PauseArguments): void {
-		this.sendEvent(new OutputEvent(`ERR>pause not implemented\n`));
+		//this.sendEvent(new OutputEvent(`ERR>pause not implemented\n`));
+		this.perlDebugger.pause() ;
 		this.sendResponse(response);
-		this.sendEvent(new StoppedEvent("breakpoint", PerlDebugSession.THREAD_ID));
+		//this.sendEvent(new StoppedEvent("breakpoint", PerlDebugSession.THREAD_ID));
 	}
-
 
 
 
@@ -511,6 +514,7 @@ class PerlDebugSession extends LoggingDebugSession {
 	 * Continue
 	 */
 	protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
+		this.sendEvent(new ContinuedEvent(PerlDebugSession.THREAD_ID));
 		this.perlDebugger.request('c')
 			.then((res) => {
 				if (res.ln) {
