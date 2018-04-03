@@ -724,6 +724,8 @@ export class perlDebuggerConnection {
 
 	async destroy() {
 		if (this.perlDebugger) {
+			this.perlDebugger.interrupt();
+			await this.request('q');
 			this.streamCatcher.destroy();
 			this.perlDebugger.kill();
 			this.perlDebugger = null;

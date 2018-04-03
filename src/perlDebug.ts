@@ -153,6 +153,20 @@ class PerlDebugSession extends LoggingDebugSession {
 		this._configurationDone.notify();
 	}
 
+    protected disconnectRequest(response: DebugProtocol.DisconnectResponse, args: DebugProtocol.DisconnectArguments): void {
+
+		this.perlDebugger.destroy()
+			.then(() => {
+				this.sendResponse(response);
+			})
+			.catch((err) => {
+				const [ error = err ] = err.errors || [];
+				this.sendEvent(new OutputEvent(`ERR>cannot destroy debugger error: ${error.message}\n`));
+				this.sendResponse(response);
+			}) ;
+		}
+
+
 	protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments) {
 		this.rootPath = args.root;
 
