@@ -44,6 +44,8 @@ export interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArgum
 	args?: string[];
 	/** enable logging the Debug Adapter Protocol */
 	trace?: boolean;
+	/** Enable debug output for the Debug Extention. Values could be one of all, adapter, stream */
+	debugExtention?: string;
 	/** env variables when executing debugger */
 	env?: {};
 	/** port for debugger to listen for remote debuggers */
@@ -103,6 +105,7 @@ class PerlDebugSession extends LoggingDebugSession {
 			// xxx: for now I need more info, code to go away...
 			const [ error ] = res.errors;
 			this.sendEvent(new OutputEvent(`onException: ${error && error.near}`));
+			this.sendEvent(new TerminatedEvent());
 		};
 
 		this.perlDebugger.onTermination = (res) => {
@@ -162,6 +165,8 @@ class PerlDebugSession extends LoggingDebugSession {
 			.catch((err) => {
 				const [ error = err ] = err.errors || [];
 				this.sendEvent(new OutputEvent(`ERR>cannot destroy debugger error: ${error.message}\n`));
+				response.success = false ;
+				response.message = error.message ;
 				this.sendResponse(response);
 			}) ;
 		}
@@ -192,7 +197,7 @@ class PerlDebugSession extends LoggingDebugSession {
 			execSshUser: args.sshUser,
 			execSshAddr: args.sshAddr,
 			execSshEnv:  args.env,
-		})
+		}, args.debugExtention)
 			.then((res) => {
 				if (args.stopOnEntry) {
 					if (res.ln) {
@@ -206,7 +211,14 @@ class PerlDebugSession extends LoggingDebugSession {
 					// we just start to run until we hit a breakpoint or an exception
 					this.continueRequest(<DebugProtocol.ContinueResponse>response, { threadId: PerlDebugSession.THREAD_ID });
 				}
-			});
+			})
+			.catch((err) => {
+				const [ error = err ] = err.errors || [];
+				this.sendEvent(new OutputEvent(`ERR>cannot start debugger error: ${error.message}\n`));
+				response.success = false ;
+				response.message = error.message ;
+				this.sendResponse(response);
+			}) ;
 
 	}
 

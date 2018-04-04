@@ -40,15 +40,17 @@ export const lastCommandLine = {
 	}
 };
 
-export const fileMatch = /^[a-zA-Z]+::\(([a-zA-Z\._-]+):([0-9]+)\):/;
+export const fileMatch = /^[a-zA-Z]+::\((.+?):([0-9]+)\):/;
 
-export const fileMatchException = /at ([a-zA-Z\._-]+) line ([0-9]+)\./;
+export const fileMatchException = /at (.+?) line ([0-9]+)\./;
 
-export const codeErrorSyntax = /^syntax error at (\S+) line ([0-9]+), near ([\S|\s]+)/;
+export const codeErrorSyntax = /^syntax error at (.+?) line ([0-9]+), near ([\S|\s]+)/;
 
-export const codeErrorRuntime = /([\S|\s]+) at (\S+) line ([0-9]+)\.$/;
+export const codeErrorRuntime = /(.+) at (.+?) line ([0-9]+)\.$/;
 
 // EG. PadWalker for scope investigation
 export const codeErrorMissingModule = /^(\S+) module not found - please install$/;
 
 export const debuggerSignature = /^  DB<[0-9]+> $/;
+
+export const runCmd = /^[snrcR]$/;

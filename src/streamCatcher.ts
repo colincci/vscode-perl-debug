@@ -24,8 +24,11 @@ export class StreamCatcher {
 	public ready: boolean = false;
 	private readyListeners = [];
 	private readyResponse: string[];
+	private outputPassthru = true ;
 
 	public input: Writable;
+	public onOutput: Function | null = null;
+
 
 	constructor() {
 			// Listen for a ready signal
@@ -37,6 +40,16 @@ export class StreamCatcher {
 					this.readyListeners.forEach(f => f(res));
 				});
 
+	}
+
+	logOutput(data: string) {
+		if (typeof this.onOutput === 'function' && this.outputPassthru) {
+			try {
+				this.onOutput(data);
+			} catch (err) {
+				throw new Error(`Error in "onOutput" handler: ${err.message}`);
+			}
+		}
 	}
 
 	launch(input: Writable, output: Readable) {
@@ -93,6 +106,7 @@ export class StreamCatcher {
 
 	readline(line) {
 		if (this.debug) console.log('line:', line);
+		this.logOutput (line) ;
 		// if (this.debug) console.log('data:', [...line]);
 		this.buffer.push(line);
 		// Test for command end
@@ -128,6 +142,7 @@ export class StreamCatcher {
 			// a null command is used for the initial run, in that case we don't need to
 			// do anything but listen
 			if (this.requestRunning.command !== null) {
+				this.outputPassthru = this.requestRunning.command.match(RX.runCmd)?true:false ;
 				this.input.write(`${this.requestRunning.command}\n`);
 			}
 		}

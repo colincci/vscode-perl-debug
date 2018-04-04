@@ -183,6 +183,11 @@
                 "description": "Enable logging for the Debug Adapter Protocol",
                 "default": false
               },
+              "debugExtention": {
+                "type": "string",
+                "description": "Enable debug output for the Debug Extention. Values could be one of all, adapter, stream",
+                "default": ""
+              },
               "port": {
                 "type": "number",
                 "description": "Port to listen for remote debuggers.",

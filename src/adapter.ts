@@ -127,7 +127,7 @@ function absoluteServerFilename(root: string, clientRoot: string, filename: stri
 }
 
 export class perlDebuggerConnection {
-	public debug: boolean = true;
+	public debug: boolean = false;
 	public perlDebugger: DebugSession;
 	public streamCatcher: StreamCatcher;
 	public perlVersion: string;
@@ -139,6 +139,9 @@ export class perlDebuggerConnection {
 	private rootPath?: string;
 	private clientRootPath?: string;
 	private currentfile?: string;
+
+	private lastFilename?: string ;
+	private lastLine?: number ;
 
 	private variables: ParsedVariableScope = {};
 
@@ -189,6 +192,7 @@ export class perlDebuggerConnection {
 			db: '',
 		};
 
+		var _this = this ;
 		res.orgData.forEach((line, i) => {
 			if (i === 0) {
 				// Command line
@@ -198,7 +202,9 @@ export class perlDebuggerConnection {
 			} else if (i === res.orgData.length - 1) {
 				// DB
 				const dbX = RX.lastCommandLine.match(line);
-				if (dbX) res.db = dbX[1];
+				if (dbX) {
+					res.db = dbX[1];
+				}
 			} else {
 				// Contents
 				line = line.replace(RX.colors, '');
@@ -210,8 +216,10 @@ export class perlDebuggerConnection {
 				const [, filename, ln] = findFilenameLine(line);
 				if (filename) {
 					res.name = filename;
-					res.filename = absoluteServerFilename(this.rootPath, this.clientRootPath, filename);
+					res.filename = absoluteServerFilename(_this.rootPath, _this.clientRootPath, filename);
 					res.ln = +ln;
+					_this.lastFilename = res.filename ;
+					_this.lastLine     = res.ln ;
 				}
 
 				// Check contents for issues
@@ -238,7 +246,7 @@ export class perlDebuggerConnection {
 						const [, filename, ln, near] = parts;
 						res.errors.push({
 							name: filename,
-							filename: absoluteServerFilename(this.rootPath, this.clientRootPath, filename),
+							filename: absoluteServerFilename(_this.rootPath, _this.clientRootPath, filename),
 							ln: +ln,
 							message: line,
 							near: near,
@@ -249,13 +257,14 @@ export class perlDebuggerConnection {
 
 				// Undefined subroutine &main::functionNotFound called at broken_code.pl line 10.
 				if (RX.codeErrorRuntime.test(line)) {
-					res.exception = true;
+					// do not terminate debugger on runtime error
+					//res.exception = true;
 					const parts = line.match(RX.codeErrorRuntime);
 					if (parts) {
 						const [, near, filename, ln] = parts;
 						res.errors.push({
 							name: filename,
-							filename: absoluteServerFilename(this.rootPath, this.clientRootPath, filename),
+							filename: absoluteServerFilename(_this.rootPath, _this.clientRootPath, filename),
 							ln: +ln,
 							message: line,
 							near: near,
@@ -266,11 +275,6 @@ export class perlDebuggerConnection {
 
 			}
 		});
-
-		if (res.exception || res.finished) {
-			// Close the connection to perl debugger
-			this.perlDebugger.kill();
-		}
 
 		if (res.exception) {
 			if (typeof this.onException === 'function') {
@@ -299,13 +303,16 @@ export class perlDebuggerConnection {
 		return res;
 	}
 
-	async launchRequest(filename: string, cwd: string, clientRoot: string, args: string[] = [], options:LaunchOptionsSsh = {}): Promise<RequestResponse> {
+	async launchRequest(filename: string, cwd: string, clientRoot: string, args: string[] = [], options:LaunchOptionsSsh = {}, debugExtention: string = ''): Promise<RequestResponse> {
 		this.rootPath = cwd.replace(/\\/g, '/').replace(/\/+$/, '') ;
-		this.clientRootPath = clientRoot.replace(/\\/g, '/').replace(/\/+$/, '') ;
+		this.clientRootPath = clientRoot?clientRoot.replace(/\\/g, '/').replace(/\/+$/, ''):null ;
 		this.filename = absoluteClientFilename(this.rootPath, this.clientRootPath, filename);
 		filename.replace(/\\/g, '/');
 		this.currentfile = this.filename;
 		const sourceFile = this.filename;
+
+		if (debugExtention.match (/all|adapater/))
+			this.debug = true ;
 
 		if (this.debug) console.log(`Platform: ${process.platform}`);
 		if (this.debug && options.env) {
@@ -359,7 +366,13 @@ export class perlDebuggerConnection {
 
 		this.streamCatcher.launch(this.perlDebugger.stdin, this.perlDebugger.stderr);
 
-		this.streamCatcher.debug = this.debug;
+		if (debugExtention.match (/all|stream/))
+			this.streamCatcher.debug = true;
+
+		this.streamCatcher.onOutput = (text) => {
+			if (text != "" && !text.match(/^[ \x08]/))
+				this.onOutput (text)
+		};
 
 		// Handle program output
 		this.perlDebugger.stdout.on('data', (buffer) => {
@@ -397,7 +410,7 @@ export class perlDebuggerConnection {
 
 		// Listen for a ready signal
 		const data = await this.streamCatcher.isReady()
-		this.logData('', data.slice(0, data.length-2));
+		//this.logData('', data.slice(0, data.length-2));
 
 		try {
 			// Get the version just after
@@ -678,9 +691,18 @@ export class perlDebuggerConnection {
 
 		});
 
-	if (result.length > 0) {
-		result[result.length-1].caller = "main::" ;
-	}
+		if (result.length > 0) {
+			result[result.length-1].caller = "main::" ;
+		} else 	if (result.length == 0) {
+			// we need at least one stack frame...
+			result.push({
+				v: '.',
+				name: '',
+				filename: this.lastFilename,
+				caller: 'main::',
+				ln: this.lastLine,
+			});
+		}
 
 	return result;
 	}
